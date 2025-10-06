@@ -80,6 +80,88 @@ class CursorConfigManager:
         
         return self.write_storage(storage)
     
+    def read_account_json(self) -> list:
+        """读取account.json文件（账号列表）"""
+        account_json_path = os.path.join(self.cursor_data_path, 'User', 'globalStorage', 'account.json')
+        
+        if not os.path.exists(account_json_path):
+            return []
+        
+        try:
+            with open(account_json_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"读取account.json失败: {e}")
+            return []
+    
+    def write_account_json(self, accounts: list) -> bool:
+        """写入account.json文件"""
+        account_json_path = os.path.join(self.cursor_data_path, 'User', 'globalStorage', 'account.json')
+        
+        try:
+            # 备份原文件
+            if os.path.exists(account_json_path):
+                backup_path = account_json_path + '.bak'
+                shutil.copy2(account_json_path, backup_path)
+            
+            with open(account_json_path, 'w', encoding='utf-8') as f:
+                json.dump(accounts, f, ensure_ascii=False, indent=2)
+            
+            return True
+        except Exception as e:
+            print(f"写入account.json失败: {e}")
+            return False
+    
+    def add_account_to_list(self, email: str, token: str, refresh_token: str = None, 
+                           workos_token: str = None, set_as_current: bool = True) -> bool:
+        """添加账号到account.json列表"""
+        accounts = self.read_account_json()
+        
+        # 检查是否已存在
+        for acc in accounts:
+            if acc.get('email') == email:
+                # 更新现有账号
+                acc['token'] = token
+                acc['refresh_token'] = refresh_token or token
+                if workos_token:
+                    acc['workos_cursor_session_token'] = workos_token
+                if set_as_current:
+                    acc['is_current'] = True
+                    # 取消其他账号的current标记
+                    for other in accounts:
+                        if other.get('email') != email:
+                            other['is_current'] = False
+                return self.write_account_json(accounts)
+        
+        # 添加新账号
+        from datetime import datetime
+        new_account = {
+            'email': email,
+            'token': token,
+            'refresh_token': refresh_token or token,
+            'is_current': set_as_current,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        if workos_token:
+            new_account['workos_cursor_session_token'] = workos_token
+        
+        # 如果设为当前账号，取消其他账号的current标记
+        if set_as_current:
+            for acc in accounts:
+                acc['is_current'] = False
+        
+        accounts.append(new_account)
+        return self.write_account_json(accounts)
+    
+    def get_current_account_from_list(self) -> Optional[Dict]:
+        """从account.json获取当前账号"""
+        accounts = self.read_account_json()
+        for acc in accounts:
+            if acc.get('is_current', False):
+                return acc
+        return None
+    
     def read_machine_id(self) -> Optional[str]:
         """读取机器ID"""
         if not os.path.exists(self.machineid_path):
@@ -117,8 +199,14 @@ class CursorConfigManager:
             print(f"备份配置失败: {e}")
             return False
     
-    def restore_config(self, backup_name: str) -> bool:
-        """恢复配置"""
+    def restore_config(self, backup_name: str, restore_settings: bool = False) -> bool:
+        """
+        恢复配置
+        
+        Args:
+            backup_name: 备份名称
+            restore_settings: 是否恢复用户设置（settings.json等）
+        """
         try:
             backup_path = os.path.join(self.backup_dir, backup_name)
             
@@ -135,6 +223,26 @@ class CursorConfigManager:
             machineid_backup = os.path.join(backup_path, 'machineid')
             if os.path.exists(machineid_backup):
                 shutil.copy2(machineid_backup, self.machineid_path)
+            
+            # 恢复用户设置
+            if restore_settings:
+                user_dir = os.path.join(self.cursor_data_path, 'User')
+                
+                # 恢复settings.json
+                settings_backup = os.path.join(backup_path, 'settings.json')
+                if os.path.exists(settings_backup):
+                    shutil.copy2(settings_backup, os.path.join(user_dir, 'settings.json'))
+                
+                # 恢复keybindings.json
+                keybindings_backup = os.path.join(backup_path, 'keybindings.json')
+                if os.path.exists(keybindings_backup):
+                    shutil.copy2(keybindings_backup, os.path.join(user_dir, 'keybindings.json'))
+                
+                # 恢复account.json
+                account_backup = os.path.join(backup_path, 'account.json')
+                if os.path.exists(account_backup):
+                    account_json_path = os.path.join(user_dir, 'globalStorage', 'account.json')
+                    shutil.copy2(account_backup, account_json_path)
             
             return True
         except Exception as e:
