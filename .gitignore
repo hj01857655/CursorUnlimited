@@ -60,6 +60,10 @@ logs/
 *.log
 
 # Testing
+test_*.py
+test_*.bat
+test_*.ps1
+*_test.py
 coverage/
 .nyc_output/
 
