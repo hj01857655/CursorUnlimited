@@ -16,12 +16,13 @@ C:\Users\{USERNAME}\AppData\Roaming\Cursor
 
 ```json
 {
-  "cursor.accessToken": "eyJhbGci...",
-  "cursor.email": "user@example.com",
+  // Cursor 账号认证字段
   "cursorAuth/accessToken": "eyJhbGci...",
   "cursorAuth/cachedEmail": "user@example.com",
   "cursorAuth/cachedSignUpType": "Auth_0",
   "cursorAuth/refreshToken": "eyJhbGci...",
+  
+  // 机器标识字段
   "storage.serviceMachineId": "uuid",
   "telemetry.machineId": "hash",
   // ... 其他配置
@@ -29,52 +30,15 @@ C:\Users\{USERNAME}\AppData\Roaming\Cursor
 ```
 
 **关键字段**：
-- `cursor.accessToken` - 访问令牌
-- `cursor.email` - 邮箱账号
-- `cursorAuth/accessToken` - 认证访问令牌
+- `cursorAuth/accessToken` - 访问令牌
 - `cursorAuth/cachedEmail` - 缓存的邮箱
 - `cursorAuth/refreshToken` - 刷新令牌
+- `cursorAuth/cachedSignUpType` - 注册类型
 - `storage.serviceMachineId` - 服务机器ID
 
 ---
 
-### 2. **account.json**
-**位置**: `User/globalStorage/account.json`
-
-存储多个账号列表，支持快速切换：
-
-```json
-[
-  {
-    "email": "user1@example.com",
-    "token": "eyJhbGci...",
-    "refresh_token": "eyJhbGci...",
-    "workos_cursor_session_token": "WorkosCursorSessionToken=...",
-    "is_current": true,
-    "created_at": "2025-09-08 19:29:09"
-  },
-  {
-    "email": "user2@example.com",
-    "token": "eyJhbGci...",
-    "refresh_token": "eyJhbGci...",
-    "workos_cursor_session_token": "WorkosCursorSessionToken=...",
-    "is_current": false,
-    "created_at": "2025-09-08 19:43:10"
-  }
-]
-```
-
-**关键字段**：
-- `email` - 邮箱账号
-- `token` - 访问令牌
-- `refresh_token` - 刷新令牌
-- `workos_cursor_session_token` - WorkOS会话令牌
-- `is_current` - 是否为当前使用账号
-- `created_at` - 创建时间
-
----
-
-### 3. **state.vscdb** (SQLite数据库)
+### 2. **state.vscdb** (SQLite数据库)
 **位置**: `User/globalStorage/state.vscdb`
 **大小**: ~658 MB
 
@@ -85,16 +49,12 @@ C:\Users\{USERNAME}\AppData\Roaming\Cursor
 #### ItemTable 中的账号认证相关key：
 
 ```
-cursor.accessToken                          # 访问令牌
-cursor.email                                # 邮箱
-cursor.featureStatus.dataPrivacyOnboarding  # 数据隐私入门状态
-
-cursorAuth/accessToken                      # 认证访问令牌
+cursorAuth/accessToken                      # 访问令牌
 cursorAuth/cachedEmail                      # 缓存的邮箱
-cursorAuth/cachedSignUpType                 # 注册类型
+cursorAuth/cachedSignUpType                 # 注册类型（如 Auth_0）
 cursorAuth/onboardingDate                   # 入职日期
 cursorAuth/refreshToken                     # 刷新令牌
-cursorAuth/stripeMembershipType             # Stripe会员类型
+cursorAuth/stripeMembershipType             # Stripe会员类型（free/pro）
 
 storage.serviceMachineId                    # 服务机器ID
 ```
@@ -132,10 +92,9 @@ cursorai/serverConfig                       # 服务器配置
 ### 方案一：完整切换（推荐）
 1. ✅ 关闭所有Cursor进程
 2. ✅ 修改 `storage.json` 中的token和email字段
-3. ✅ 修改 `account.json` 设置 `is_current` 标记
-4. ✅ 可选：修改 `state.vscdb` 数据库中的对应字段
-5. ✅ 可选：修改 `machineid`（如果需要更换设备）
-6. ✅ 重启Cursor
+3. ✅ 修改 `state.vscdb` 数据库中的对应字段
+4. ✅ 可选：修改 `machineid`（如果需要更换设备）
+5. ✅ 重启Cursor
 
 ### 方案二：快速切换
 1. ✅ 关闭Cursor
@@ -149,17 +108,19 @@ cursorai/serverConfig                       # 服务器配置
 4. ✅ 重启Cursor
 
 ---
-
 ## 📋 字段对应关系
 
-| storage.json | account.json | state.vscdb (ItemTable) |
-|-------------|--------------|------------------------|
-| cursor.accessToken | token | cursor.accessToken |
-| cursor.email | email | cursor.email |
-| cursorAuth/accessToken | token | cursorAuth/accessToken |
-| cursorAuth/cachedEmail | email | cursorAuth/cachedEmail |
-| cursorAuth/refreshToken | refresh_token | cursorAuth/refreshToken |
-| - | workos_cursor_session_token | - |
+|| storage.json | state.vscdb (ItemTable) |
+|-------------|------------------------|
+| cursorAuth/accessToken | cursorAuth/accessToken |
+| cursorAuth/cachedEmail | cursorAuth/cachedEmail |
+| cursorAuth/refreshToken | cursorAuth/refreshToken |
+| cursorAuth/cachedSignUpType | cursorAuth/cachedSignUpType |
+| storage.serviceMachineId | storage.serviceMachineId |
+| telemetry.machineId | - |
+| telemetry.macMachineId | - |
+| telemetry.devDeviceId | - |
+| telemetry.sqmId | - |
 
 ---
 
@@ -173,18 +134,228 @@ cursorai/serverConfig                       # 服务器配置
 
 ---
 
-## 🛠️ 实现建议
+## 🛠️ 工具类实现
+
+### SqliteUtil 工具类
+**位置**: `src/utils/sqlite_util.py`
+
+专门用于操作 Cursor 的 `state.vscdb` 数据库的工具类。
+
+#### 核心特性：
+
+1. **上下文管理器连接** - 自动管理数据库连接
+2. **批量操作优化** - 单次连接处理多个操作
+3. **内置键常量** - 预定义所有 Cursor 相关键名
+4. **备份支持** - SQLite 在线备份 API
+
+#### 预定义的键常量：
+
+**机器标识键** (`MACHINE_ID_KEYS`):
+```python
+[
+    'storage.serviceMachineId',
+    'telemetry.machineId',
+    'telemetry.macMachineId',
+    'telemetry.devDeviceId',
+    'telemetry.sqmId',
+    'telemetry.firstSessionDate',
+    'telemetry.currentSessionDate',
+    'telemetry.lastSessionDate'
+]
+```
+
+**账号认证键** (`AUTH_KEYS`):
+```python
+[
+    'cursorAuth/accessToken',
+    'cursorAuth/cachedEmail',
+    'cursorAuth/refreshToken',
+    'cursorAuth/cachedSignUpType',
+    'cursorAuth/onboardingDate',
+    'cursorAuth/stripeMembershipType'
+]
+```
+
+**排除的系统键** (`EXCLUDED_KEYS_PATTERNS`):
+```python
+[
+    'workbench.',      # 工作台UI状态
+    'terminal.',       # 终端状态
+    'window.',         # 窗口位置和大小
+    'editor.',         # 编辑器状态
+    'files.hotExit',   # 热退出状态
+    'search.history',  # 搜索历史
+    'debug.'           # 调试状态
+]
+```
+
+#### 核心方法：
+
+**连接管理**:
+```python
+# 上下文管理器
+with SqliteUtil.get_connection(db_path) as conn:
+    cursor = conn.cursor()
+    # ... 数据库操作
+
+# 数据库备份
+SqliteUtil.backup_database(db_path, backup_path)
+```
+
+**Cursor 专用方法**:
+```python
+# 读取单个值
+value = SqliteUtil.read_cursor_value(db_path, 'cursorAuth/accessToken')
+
+# 写入单个值
+SqliteUtil.write_cursor_value(db_path, 'cursorAuth/cachedEmail', 'user@example.com')
+
+# 批量获取机器标识
+machine_ids = SqliteUtil.get_machine_ids(db_path)
+
+# 批量设置机器标识（单次连接优化）
+SqliteUtil.set_machine_ids(db_path, {
+    'telemetry.machineId': 'new_machine_id',
+    'telemetry.devDeviceId': 'new_device_id'
+})
+
+# 批量获取认证信息
+auth_info = SqliteUtil.get_auth_info(db_path)
+
+# 批量设置认证信息（单次连接优化）
+SqliteUtil.set_auth_info(db_path, {
+    'cursorAuth/accessToken': 'token...',
+    'cursorAuth/cachedEmail': 'user@example.com'
+})
+
+# 清空所有认证信息（登出）
+SqliteUtil.clear_auth_info(db_path)
+
+# 获取所有键名
+all_keys = SqliteUtil.get_all_keys(db_path)
+```
+
+---
+
+## 🏗️ 项目架构
+
+### 核心模块
+
+```
+src/
+├── automation/
+│   ├── cursor_manager.py          # Cursor 进程管理
+│   ├── config_manager.py          # 配置文件管理
+│   ├── machine_id_manager.py      # 机器ID管理
+│   └── auth_manager.py            # 账号认证管理
+├── utils/
+│   ├── sqlite_util.py             # SQLite 数据库工具类 ⭐ 新增
+│   ├── file_util.py               # JSON 文件和备份工具
+│   ├── registry_util.py           # Windows 注册表工具
+│   ├── logger.py                  # 日志系统
+│   └── config.py                  # 配置管理
+├── models/
+│   ├── account.py                 # 账号数据模型
+│   └── database.py                # 数据库模型
+└── services/
+    └── account_switcher.py        # 账号切换服务
+```
+
+### 模块说明
+
+#### 1. **CursorManager** (`cursor_manager.py`)
+- 检测 Cursor 进程
+- 关闭/启动 Cursor
+- 获取 Cursor 安装路径
+- 日志记录
+
+#### 2. **CursorConfigManager** (`config_manager.py`)
+- 读写 `storage.json`
+- 读写 `state.vscdb`
+- 备份/恢复配置
+- 清除 token（登出）
+
+#### 3. **MachineIdManager** (`machine_id_manager.py`)
+- 生成新的机器标识
+- 备份/恢复机器标识
+- 重置机器标识
+- 应用到配置文件
+
+#### 4. **SqliteUtil** (`sqlite_util.py`) ⭐
+- 数据库连接管理（上下文管理器）
+- 批量读写优化
+- Cursor 专用键定义
+- 数据库备份
+
+#### 5. **RegistryUtil** (`registry_util.py`)
+- Windows 注册表读写
+- 获取系统机器 GUID
+- SQM ID 管理
+
+---
+
+## 📝 实现建议
 
 ### 切换账号的完整流程：
 ```python
-1. 检测并关闭Cursor进程
-2. 备份当前配置（storage.json, account.json, state.vscdb）
-3. 从数据库读取目标账号信息
-4. 更新 storage.json
-5. 更新 account.json 的 is_current 标记
-6. 可选：更新 state.vscdb
-7. 重启Cursor
-8. 记录操作日志
+from src.automation.cursor_manager import CursorManager
+from src.automation.config_manager import CursorConfigManager
+from src.utils.sqlite_util import SqliteUtil
+
+# 1. 检测并关闭Cursor进程
+cursor_mgr = CursorManager()
+if cursor_mgr.is_cursor_running():
+    cursor_mgr.close_cursor()
+
+# 2. 备份当前配置
+config_mgr = CursorConfigManager()
+config_mgr.backup_config('backup_before_switch')
+
+# 3. 更新 storage.json
+storage = config_mgr.read_storage()
+storage['cursorAuth/accessToken'] = new_token
+storage['cursorAuth/cachedEmail'] = new_email
+config_mgr.write_storage(storage)
+
+# 4. 更新 state.vscdb（使用 SqliteUtil）
+db_path = config_mgr.state_vscdb_path
+SqliteUtil.set_auth_info(db_path, {
+    'cursorAuth/accessToken': new_token,
+    'cursorAuth/cachedEmail': new_email,
+    'cursorAuth/refreshToken': new_refresh_token
+})
+
+# 5. 重启Cursor
+cursor_mgr.start_cursor()
+```
+
+### 重置机器标识的完整流程：
+```python
+from src.automation.machine_id_manager import MachineIdManager
+from src.utils.sqlite_util import SqliteUtil
+
+# 1. 关闭 Cursor
+cursor_mgr.close_cursor()
+
+# 2. 生成新的机器标识
+machine_mgr = MachineIdManager()
+new_ids = machine_mgr.generate_new_machine_ids()
+
+# 3. 应用到 storage.json
+machine_mgr.apply_machine_ids(new_ids)
+
+# 4. 同步到 state.vscdb
+db_path = config_mgr.state_vscdb_path
+db_machine_ids = {
+    'telemetry.machineId': new_ids['machineId'],
+    'telemetry.macMachineId': new_ids['macMachineId'],
+    'telemetry.devDeviceId': new_ids['devDeviceId'],
+    'telemetry.sqmId': new_ids['sqmId']
+}
+SqliteUtil.set_machine_ids(db_path, db_machine_ids)
+
+# 5. 重启 Cursor
+cursor_mgr.start_cursor()
 ```
 
 ---
@@ -199,7 +370,6 @@ Cursor数据目录/
 │   ├── keybindings.json                    # 快捷键
 │   └── globalStorage/
 │       ├── storage.json                    # 主配置（含token）⭐
-│       ├── account.json                    # 账号列表 ⭐
 │       └── state.vscdb                     # 状态数据库 ⭐
 └── [其他文件...]
 ```
@@ -208,5 +378,73 @@ Cursor数据目录/
 
 ---
 
-**文档更新时间**: 2025-10-07
-**适用版本**: Cursor 0.x
+---
+
+## 🔧 数据库操作最佳实践
+
+### 1. 使用上下文管理器
+```python
+# ✅ 推荐：自动管理连接
+with SqliteUtil.get_connection(db_path) as conn:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM ItemTable")
+    results = cursor.fetchall()
+# 连接自动关闭
+
+# ❌ 不推荐：手动管理连接
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
+# ... 容易忘记关闭
+conn.close()
+```
+
+### 2. 批量操作优化
+```python
+# ✅ 推荐：单次连接批量操作
+SqliteUtil.set_auth_info(db_path, {
+    'cursorAuth/accessToken': token,
+    'cursorAuth/cachedEmail': email,
+    'cursorAuth/refreshToken': refresh_token
+})
+
+# ❌ 不推荐：多次连接
+SqliteUtil.write_cursor_value(db_path, 'cursorAuth/accessToken', token)
+SqliteUtil.write_cursor_value(db_path, 'cursorAuth/cachedEmail', email)
+SqliteUtil.write_cursor_value(db_path, 'cursorAuth/refreshToken', refresh_token)
+```
+
+### 3. 备份数据库
+```python
+# 使用 SQLite 在线备份 API
+backup_path = 'backup/state.vscdb.backup'
+SqliteUtil.backup_database(db_path, backup_path)
+```
+
+### 4. 错误处理
+```python
+try:
+    with SqliteUtil.get_connection(db_path) as conn:
+        # 数据库操作
+        pass
+except FileNotFoundError:
+    print("数据库文件不存在")
+except sqlite3.Error as e:
+    print(f"数据库操作失败: {e}")
+```
+
+---
+
+## 📊 性能优化对比
+
+| 操作 | 优化前 | 优化后 | 提升 |
+|------|--------|--------|------|
+| 批量设置认证信息 (6个字段) | 6次连接 | 1次连接 | **6x** |
+| 批量设置机器标识 (8个字段) | 8次连接 | 1次连接 | **8x** |
+| 数据库备份 | 文件复制 | SQLite API | **更安全** |
+| 连接管理 | 手动关闭 | 自动管理 | **更可靠** |
+
+---
+
+**文档更新时间**: 2025-10-07  
+**适用版本**: Cursor 0.x  
+**工具类版本**: SqliteUtil v2.0 (优化版)
